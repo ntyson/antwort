@@ -1,3 +1,5 @@
+# Deploy from the antwort monorepo root (Railway default).
+# Prefer setting Root Directory to `alpaca-bot` instead; this is a fallback.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -8,15 +10,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DATA_DIR=/app/data \
     LOG_DIR=/app/logs
 
-COPY requirements.txt .
+COPY alpaca-bot/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY pyproject.toml .
-COPY src ./src
+COPY alpaca-bot/pyproject.toml .
+COPY alpaca-bot/src ./src
 RUN pip install --no-cache-dir -e .
 
 RUN mkdir -p /app/data /app/logs
 
 EXPOSE 8080
-# Long-running worker; opens $PORT health endpoint when Railway sets it
 CMD ["python", "-m", "alpaca_bot", "run"]

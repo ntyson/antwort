@@ -62,34 +62,33 @@ python -m alpaca_bot flatten     # close everything
 
 Yes — Railway can host this as a long-running **worker** (not a website).
 
-1. Push this repo to GitHub and open [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub**
-2. Select this repo
-3. In the service **Settings**:
-   - **Root Directory:** `alpaca-bot`
-   - **Builder:** Dockerfile (auto-detected), or set start command to  
-     `python -m alpaca_bot run`
-4. In **Variables**, add:
+The failed GitHub check `focused-appreciation - antwort` was **Railway’s deploy**, not unit tests.
+
+1. Open [railway.app](https://railway.app) → your project → the **antwort** service
+2. **Settings → Root Directory:** set to `alpaca-bot` (recommended)  
+   If you leave it blank, the repo-root `Dockerfile` also builds this bot.
+3. **Variables** (required — deploy fails/idles without them):
 
 | Variable | Value |
 |----------|--------|
 | `ALPACA_API_KEY` | your paper key |
 | `ALPACA_SECRET_KEY` | your paper secret |
 | `ALPACA_PAPER` | `true` |
-| `RISK_PROFILE` | `aggressive` (optional) |
 
-5. Deploy. In **Settings → Restart policy**, use restart on failure so the loop comes back if it crashes.
-6. Watch **Deploy Logs** — you should see cycle summaries every ~60s. When the US market is closed it will log `market closed` and wait.
+4. **Settings → Deploy:** start command should be `python -m alpaca_bot run` (Dockerfile already sets this)
+5. Turn **off** any custom health check path other than `/health`, or leave Railway’s default — the bot serves `GET /health` on `$PORT`
+6. Redeploy. Logs should show cycle summaries every ~60s (or `market closed` outside US hours)
 
-Check trades in the [Alpaca paper dashboard](https://app.alpaca.markets/paper/dashboard/overview). There is no public URL; this service does not serve HTTP.
+Check trades in the [Alpaca paper dashboard](https://app.alpaca.markets/paper/dashboard/overview).
 
-**Billing note:** use a Railway plan that keeps the service awake 24/7. Sleeping / ephemeral free tiers will stop the loop when the machine is idle.
+**Billing note:** use a Railway plan that keeps the service awake 24/7.
 
 ### Local Docker (same image Railway uses)
 
 ```bash
 cd alpaca-bot
 docker build -t alpaca-bot .
-docker run --env-file .env alpaca-bot
+docker run -e PORT=8080 --env-file .env alpaca-bot
 ```
 
 ## Configuration

@@ -13,6 +13,7 @@ from rich.table import Table
 from alpaca_bot.backtest import run_backtest
 from alpaca_bot.client import AlpacaClient
 from alpaca_bot.config import Settings, get_settings
+from alpaca_bot.health import start_health_server
 from alpaca_bot.loop import TradingLoop
 from alpaca_bot.risk import RiskManager
 from alpaca_bot.state import StateStore
@@ -90,7 +91,20 @@ def cmd_once() -> int:
 
 
 def cmd_run() -> int:
+    # Railway (and similar) set PORT and may health-check it
+    start_health_server()
+
     settings = get_settings()
+    if not settings.alpaca_api_key or not settings.alpaca_secret_key:
+        console.print(
+            "[red]Missing ALPACA_API_KEY / ALPACA_SECRET_KEY.[/]\n"
+            "Add them in Railway → Variables, then redeploy."
+        )
+        # Keep health server up so the platform doesn't flap while you add secrets
+        logging.error("Waiting for Alpaca credentials — set env vars and redeploy")
+        while True:
+            time.sleep(3600)
+
     loop = build_loop(settings)
     console.print(
         f"[bold green]Starting autonomous loop[/] every {settings.loop_interval_seconds}s "
