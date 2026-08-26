@@ -3,6 +3,12 @@
 ### Responsive Layouts for Email
 ![Responsive Layouts for Email](http://internations.github.io/antwort/images/antwort-v1-graphic.png "Responsive Layouts for Email")
 
+## Alpaca day-trading bot
+
+An autonomous Alpaca stock day trader lives in [`alpaca-bot/`](./alpaca-bot/). Paper trading by default, with survival-mode risk adaptation. See that folder’s README for setup (`python -m alpaca_bot run`).
+
+---
+
 Antwort offers responsive layouts for Email that both fits _and_ adapts to client widths. Don't underwhelm desktop users with single column layouts that work for mobile. Antwort offers columns on desktop that automatically become rows on mobile.
 
 Author: Julie Ng ([@jng5](http://twitter.com/jng5))  
