@@ -58,6 +58,40 @@ python -m alpaca_bot backtest    # synthetic smoke backtest
 python -m alpaca_bot flatten     # close everything
 ```
 
+## Deploy on Railway (no local computer)
+
+Yes — Railway can host this as a long-running **worker** (not a website).
+
+1. Push this repo to GitHub and open [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub**
+2. Select this repo
+3. In the service **Settings**:
+   - **Root Directory:** `alpaca-bot`
+   - **Builder:** Dockerfile (auto-detected), or set start command to  
+     `python -m alpaca_bot run`
+4. In **Variables**, add:
+
+| Variable | Value |
+|----------|--------|
+| `ALPACA_API_KEY` | your paper key |
+| `ALPACA_SECRET_KEY` | your paper secret |
+| `ALPACA_PAPER` | `true` |
+| `RISK_PROFILE` | `aggressive` (optional) |
+
+5. Deploy. In **Settings → Restart policy**, use restart on failure so the loop comes back if it crashes.
+6. Watch **Deploy Logs** — you should see cycle summaries every ~60s. When the US market is closed it will log `market closed` and wait.
+
+Check trades in the [Alpaca paper dashboard](https://app.alpaca.markets/paper/dashboard/overview). There is no public URL; this service does not serve HTTP.
+
+**Billing note:** use a Railway plan that keeps the service awake 24/7. Sleeping / ephemeral free tiers will stop the loop when the machine is idle.
+
+### Local Docker (same image Railway uses)
+
+```bash
+cd alpaca-bot
+docker build -t alpaca-bot .
+docker run --env-file .env alpaca-bot
+```
+
 ## Configuration
 
 | Env var | Default | Meaning |
