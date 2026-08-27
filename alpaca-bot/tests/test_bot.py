@@ -55,6 +55,8 @@ def test_risk_survival_from_position_loss(tmp_path):
     settings = Settings(
         ALPACA_API_KEY="x",
         ALPACA_SECRET_KEY="y",
+        RISK_PROFILE="aggressive",
+        SURVIVAL_ENABLED=True,
         SURVIVAL_POSITION_LOSS_PCT=1.5,
     ).resolved()
     store = StateStore(tmp_path / "t4.db")
@@ -73,7 +75,12 @@ def test_risk_survival_from_position_loss(tmp_path):
 
 
 def test_position_cut_threshold():
-    settings = Settings(ALPACA_API_KEY="x", ALPACA_SECRET_KEY="y").resolved()
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        POSITION_CUT_PCT=2.0,
+        SURVIVAL_POSITION_CUT_PCT=1.0,
+    ).resolved()
     risk = RiskManager(settings, StateStore(Path("/tmp/x.db")))  # noqa: S108
     risk.mode = TradingMode.NORMAL
     assert risk.position_cut_threshold() == -2.0
@@ -82,7 +89,12 @@ def test_position_cut_threshold():
 
 
 def test_risk_survival_sticky_for_session(tmp_path):
-    settings = Settings(ALPACA_API_KEY="x", ALPACA_SECRET_KEY="y").resolved()
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        RISK_PROFILE="aggressive",
+        SURVIVAL_ENABLED=True,
+    ).resolved()
     store = StateStore(tmp_path / "t5.db")
     risk = RiskManager(settings, store)
     store.set_meta("day_start_date", __import__("datetime").date.today().isoformat())
@@ -104,6 +116,7 @@ def test_risk_blocks_reentry_after_cut(tmp_path):
         ALPACA_API_KEY="x",
         ALPACA_SECRET_KEY="y",
         PDT_GUARD=False,
+        BLOCK_REENTRY_AFTER_CUT=True,
     ).resolved()
     store = StateStore(tmp_path / "t6.db")
     store.set_meta("cut_symbols_today", "META")
@@ -115,11 +128,54 @@ def test_risk_blocks_reentry_after_cut(tmp_path):
     assert "cut earlier" in d.reason
 
 
+def test_max_growth_skips_survival(tmp_path):
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        RISK_PROFILE="max",
+    ).resolved()
+    assert settings.is_max_growth()
+    assert settings.max_position_pct == 0.28
+    store = StateStore(tmp_path / "tmax.db")
+    risk = RiskManager(settings, store)
+    store.set_meta("day_start_date", __import__("datetime").date.today().isoformat())
+    store.set_meta("day_start_equity", "102000")
+    store.set_meta("day_peak_equity", "102500")
+
+    class Pos:
+        unrealized_plpc = -0.05
+
+    acct = AccountSnapshot(
+        equity=100_000, cash=50_000, buying_power=200_000, day_pl_pct=-2.0, open_positions=1
+    )
+    assert risk.sync_mode(acct, {"META": Pos()}) == TradingMode.NORMAL
+
+
+def test_max_sprint_sizes_up_when_behind(tmp_path):
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        RISK_PROFILE="max",
+        PDT_GUARD=False,
+        MAX_POSITION_PCT=0.5,
+        SPRINT_SIZE_MULT=1.5,
+    ).resolved()
+    risk = RiskManager(settings, StateStore(tmp_path / "tsprint.db"))
+    sig = Signal("NVDA", Side.BUY, 0.9, "momentum", "x", stop_price=90.0, atr=5.0)
+    flat = AccountSnapshot(100_000, 50_000, 200_000, 0.5, 0)
+    behind = AccountSnapshot(100_000, 50_000, 200_000, -1.0, 0)
+    d_flat = risk.approve(sig, flat, price=100.0, already_held=False)
+    d_behind = risk.approve(sig, behind, price=100.0, already_held=False)
+    assert d_flat.approved and d_behind.approved
+    assert d_behind.qty > d_flat.qty
+
+
 def test_risk_survival_and_halt(tmp_path):
     settings = Settings(
         ALPACA_API_KEY="x",
         ALPACA_SECRET_KEY="y",
         RISK_PROFILE="aggressive",
+        SURVIVAL_ENABLED=True,
         SURVIVAL_DRAWDOWN_PCT=1.0,
         MAX_DAILY_LOSS_PCT=3.0,
     ).resolved()

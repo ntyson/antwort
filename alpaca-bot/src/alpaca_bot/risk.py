@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from enum import Enum
 from typing import Any, Optional
 
@@ -12,7 +12,7 @@ from alpaca_bot.strategies.base import Signal
 
 class TradingMode(str, Enum):
     NORMAL = "normal"
-    SURVIVAL = "survival"  # same-session only, tighter filters
+    SURVIVAL = "survival"  # defensive (optional); MAX profile skips this
     HALTED = "halted"
 
 
@@ -96,13 +96,19 @@ class RiskManager:
 
         max_daily = float(self.settings.max_daily_loss_pct or 3.0)
         max_weekly = float(self.settings.max_weekly_loss_pct)
-        survival_dd = float(self.settings.survival_drawdown_pct)
-        survival_giveback = float(self.settings.survival_giveback_pct)
-        survival_pos_loss = float(self.settings.survival_position_loss_pct)
 
         if day_dd >= max_daily or week_dd >= max_weekly:
             self.halt(f"drawdown circuit breaker day={day_dd:.2f}% week={week_dd:.2f}%")
             return self.mode
+
+        # MAX growth: never enter defensive survival — keep deploying
+        if not self.settings.survival_enabled or self.settings.is_max_growth():
+            self.mode = TradingMode.NORMAL
+            return self.mode
+
+        survival_dd = float(self.settings.survival_drawdown_pct)
+        survival_giveback = float(self.settings.survival_giveback_pct)
+        survival_pos_loss = float(self.settings.survival_position_loss_pct)
 
         giveback_pct = ((peak - account.equity) / peak * 100) if peak > 0 else 0.0
         worst_pos_pct = self._worst_position_pct(positions)
@@ -213,13 +219,14 @@ class RiskManager:
         if already_held:
             return RiskDecision(False, 0, "already holding — no averaging down", self.mode)
 
-        cuts = {
-            s.strip().upper()
-            for s in (self.store.get_meta("cut_symbols_today") or "").split(",")
-            if s.strip()
-        }
-        if signal.symbol.upper() in cuts:
-            return RiskDecision(False, 0, "symbol cut earlier today", self.mode)
+        if self.settings.block_reentry_after_cut:
+            cuts = {
+                s.strip().upper()
+                for s in (self.store.get_meta("cut_symbols_today") or "").split(",")
+                if s.strip()
+            }
+            if signal.symbol.upper() in cuts:
+                return RiskDecision(False, 0, "symbol cut earlier today", self.mode)
 
         if self.settings.pdt_guard and account.equity < self.settings.pdt_equity_threshold:
             since = (date.today() - timedelta(days=7)).isoformat()
@@ -236,12 +243,17 @@ class RiskManager:
         # Scale size by conviction (tweet: size up when disagreement is wide)
         risk_budget *= 0.5 + signal.score
         if self.mode == TradingMode.SURVIVAL:
-            risk_budget *= 0.75  # still deploy capital into best setups, but smaller
+            risk_budget *= 0.75
+        elif self.settings.is_max_growth() and account.day_pl_pct < 0:
+            # Behind on the day → sprint: size up into best setups
+            risk_budget *= float(self.settings.sprint_size_mult)
 
         qty = risk_budget / risk_per_share
         max_notional = account.equity * float(self.settings.max_position_pct or 0.1)
         if self.mode == TradingMode.SURVIVAL:
             max_notional *= 0.65
+        elif self.settings.is_max_growth() and account.day_pl_pct < 0:
+            max_notional *= float(self.settings.sprint_size_mult)
         qty = min(qty, max_notional / price, account.buying_power / price)
         qty = max(0.0, float(int(qty * 1000) / 1000))  # milli-share friendly
 

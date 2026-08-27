@@ -2,14 +2,14 @@
 
 Autonomous stock day trader for [Alpaca](https://alpaca.markets/) paper (default) or live accounts.
 
-Inspired by agent-style loops that scan on a timer, trade only when the edge is wide enough, size by conviction, and **change behavior under drawdown** (survival mode) instead of averaging down into a hole.
+Inspired by agent-style loops that scan on a timer, trade when the edge is wide enough, size by conviction, and **sprint for growth** by default (`RISK_PROFILE=max`). Optional defensive survival mode is available if you turn it on.
 
 > No bot can guarantee the highest return. This one optimizes for high-conviction intraday momentum/VWAP/breakout edges with hard loss limits. Past or synthetic backtests are not predictive.
 
 ## What it does every cycle
 
 1. Confirms the US equity session is open  
-2. Syncs **normal / survival / halted** mode from day drawdown, peak giveback, or bleeding positions  
+2. Syncs **normal / survival / halted** mode (survival is optional; MAX profile stays in growth mode)  
 3. Manages exits (signal sells, survival cuts, EOD flatten)  
 4. Pulls bars for the watchlist and runs four strategies  
 5. Keeps only setups above the conviction threshold  
@@ -17,9 +17,22 @@ Inspired by agent-style loops that scan on a timer, trade only when the edge is 
 7. Submits bracket orders (entry + stop + take-profit)  
 8. Logs every risk decision and fill to SQLite  
 
-### Survival mode (tweet-style adaptation)
+### MAX growth profile (default)
 
-Survival mode triggers when **any** of these fire:
+Default `RISK_PROFILE=max` is built to **deploy capital hard and grow equity fast** (paper-friendly):
+
+- ~28% max position, up to 12 names, 3.5% risk/trade, score floor 0.35  
+- Up to 5 new entries per cycle  
+- Defensive survival **off** (keeps trading through noise)  
+- When day P/L is negative → **sprint size-up** (`SPRINT_SIZE_MULT`)  
+- Wider loser cut (~3.5%) and higher take-profit multiple so winners can run  
+- Watchlist includes high-beta names + leveraged ETFs (`TQQQ`, `SOXL`)  
+
+Hard circuit breaker still halts at `MAX_DAILY_LOSS_PCT` / `MAX_WEEKLY_LOSS_PCT`.
+
+### Optional defensive survival
+
+Set `SURVIVAL_ENABLED=true` (and usually `RISK_PROFILE=aggressive`) to tighten under drawdown:
 
 - Day drawdown ≥ `SURVIVAL_DRAWDOWN_PCT` (default 2%)
 - Giveback from intraday equity peak ≥ `SURVIVAL_GIVEBACK_PCT` (default 0.5%)
@@ -30,10 +43,8 @@ Then the bot:
 - **Stays in survival for the rest of the session** once triggered (no flip-flop back to normal)
 - Drops mean-reversion  
 - Raises the minimum signal score  
-- Trims position size and max concurrent names (still deploys into best setups)  
-- Cuts open losers at `SURVIVAL_POSITION_CUT_PCT` (default 1%) instead of waiting for 2%  
-
-If daily or weekly loss limits trip → **halt** (no new entries).
+- Trims position size and max concurrent names  
+- Cuts open losers at `SURVIVAL_POSITION_CUT_PCT` (default 1%)  
 
 ## Strategies
 
@@ -104,16 +115,20 @@ docker run -e PORT=8080 --env-file .env alpaca-bot
 |---------|---------|---------|
 | `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | — | Required |
 | `ALPACA_PAPER` | `true` | Paper vs live |
-| `RISK_PROFILE` | `aggressive` | `conservative` / `moderate` / `aggressive` |
-| `LOOP_INTERVAL_SECONDS` | `60` | Cycle period |
+| `RISK_PROFILE` | `max` | `conservative` / `moderate` / `aggressive` / `max` |
+| `LOOP_INTERVAL_SECONDS` | `45` | Cycle period |
 | `STRATEGIES` | `momentum,vwap,breakout,mean_reversion` | Active set |
-| `WATCHLIST` | liquid US names + ETFs | Comma-separated |
+| `WATCHLIST` | liquid US names + high-beta / leveraged ETFs | Comma-separated |
 | `MAX_DAILY_LOSS_PCT` | profile | Circuit breaker |
+| `MAX_NEW_PER_CYCLE` | `5` | New entries allowed each scan |
+| `SURVIVAL_ENABLED` | `false` | Turn on defensive survival |
 | `SURVIVAL_DRAWDOWN_PCT` | `2.0` | Enter survival on day drawdown |
 | `SURVIVAL_GIVEBACK_PCT` | `0.5` | Enter survival on peak giveback |
 | `SURVIVAL_POSITION_LOSS_PCT` | `1.5` | Enter survival if any position bleeds |
-| `POSITION_CUT_PCT` | `2.0` | Cut losers in normal mode |
+| `POSITION_CUT_PCT` | `3.5` | Cut losers in normal / max mode |
 | `SURVIVAL_POSITION_CUT_PCT` | `1.0` | Cut losers faster in survival |
+| `SPRINT_SIZE_MULT` | `1.35` | Size-up when day P/L negative (MAX) |
+| `BLOCK_REENTRY_AFTER_CUT` | `false` | Block re-buy of cut symbols same day |
 | `DRY_RUN` | `false` | Log decisions without ordering |
 | `RECAP_EMAIL_TO` | — | Email address for daily close recap |
 | `RESEND_API_KEY` | — | Send recap via [Resend](https://resend.com) |
@@ -121,6 +136,7 @@ docker run -e PORT=8080 --env-file .env alpaca-bot
 | `RECAP_WEBHOOK_URL` | — | Optional Discord/Slack webhook |
 
 Aggressive profile defaults: ~15% max position, 8 names, 1.5% risk/trade, 4% daily loss halt.
+Max profile defaults: ~28% max position, 12 names, 3.5% risk/trade, 8% daily loss halt.
 
 ### Daily recap email
 

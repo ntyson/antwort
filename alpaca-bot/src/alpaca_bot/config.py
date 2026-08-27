@@ -13,6 +13,7 @@ class RiskProfile(str, Enum):
     CONSERVATIVE = "conservative"
     MODERATE = "moderate"
     AGGRESSIVE = "aggressive"
+    MAX = "max"  # paper sprint: deploy hard, grow equity fast
 
 
 PROFILE_DEFAULTS = {
@@ -37,6 +38,13 @@ PROFILE_DEFAULTS = {
         "risk_per_trade_pct": 1.5,
         "min_signal_score": 0.45,
     },
+    RiskProfile.MAX: {
+        "max_position_pct": 0.28,
+        "max_positions": 12,
+        "max_daily_loss_pct": 8.0,
+        "risk_per_trade_pct": 3.5,
+        "min_signal_score": 0.35,
+    },
 }
 
 
@@ -44,6 +52,8 @@ DEFAULT_WATCHLIST = [
     "SPY",
     "QQQ",
     "IWM",
+    "TQQQ",
+    "SOXL",
     "AAPL",
     "MSFT",
     "NVDA",
@@ -56,6 +66,11 @@ DEFAULT_WATCHLIST = [
     "NFLX",
     "CRM",
     "COST",
+    "PLTR",
+    "SMCI",
+    "COIN",
+    "ARM",
+    "MU",
 ]
 
 
@@ -71,8 +86,8 @@ class Settings(BaseSettings):
     alpaca_secret_key: str = Field(default="", alias="ALPACA_SECRET_KEY")
     alpaca_paper: bool = Field(default=True, alias="ALPACA_PAPER")
 
-    risk_profile: RiskProfile = Field(default=RiskProfile.AGGRESSIVE, alias="RISK_PROFILE")
-    loop_interval_seconds: int = Field(default=60, alias="LOOP_INTERVAL_SECONDS")
+    risk_profile: RiskProfile = Field(default=RiskProfile.MAX, alias="RISK_PROFILE")
+    loop_interval_seconds: int = Field(default=45, alias="LOOP_INTERVAL_SECONDS")
     bar_timeframe: str = Field(default="5Min", alias="BAR_TIMEFRAME")
     lookback_bars: int = Field(default=120, alias="LOOKBACK_BARS")
 
@@ -81,19 +96,24 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float | None = Field(default=None, alias="MAX_DAILY_LOSS_PCT")
     risk_per_trade_pct: float | None = Field(default=None, alias="RISK_PER_TRADE_PCT")
     min_signal_score: float | None = Field(default=None, alias="MIN_SIGNAL_SCORE")
+    max_new_per_cycle: int = Field(default=5, alias="MAX_NEW_PER_CYCLE")
 
     stop_atr_mult: float = Field(default=1.5, alias="STOP_ATR_MULT")
-    take_profit_r: float = Field(default=2.0, alias="TAKE_PROFIT_R")
+    take_profit_r: float = Field(default=3.0, alias="TAKE_PROFIT_R")
     trail_atr_mult: float = Field(default=1.2, alias="TRAIL_ATR_MULT")
 
-    # Survival mode: tighten when day, peak giveback, or any big loser
+    # Defensive survival (off by default — MAX growth is the default profile)
+    survival_enabled: bool = Field(default=False, alias="SURVIVAL_ENABLED")
     survival_drawdown_pct: float = Field(default=2.0, alias="SURVIVAL_DRAWDOWN_PCT")
     survival_giveback_pct: float = Field(default=0.5, alias="SURVIVAL_GIVEBACK_PCT")
     survival_position_loss_pct: float = Field(default=1.5, alias="SURVIVAL_POSITION_LOSS_PCT")
-    position_cut_pct: float = Field(default=2.0, alias="POSITION_CUT_PCT")
+    position_cut_pct: float = Field(default=3.5, alias="POSITION_CUT_PCT")
     survival_position_cut_pct: float = Field(default=1.0, alias="SURVIVAL_POSITION_CUT_PCT")
+    block_reentry_after_cut: bool = Field(default=False, alias="BLOCK_REENTRY_AFTER_CUT")
+    # When day P/L is negative, size up to recover faster (MAX growth)
+    sprint_size_mult: float = Field(default=1.35, alias="SPRINT_SIZE_MULT")
     # Hard stop: flatten + halt for the day
-    max_weekly_loss_pct: float = Field(default=8.0, alias="MAX_WEEKLY_LOSS_PCT")
+    max_weekly_loss_pct: float = Field(default=12.0, alias="MAX_WEEKLY_LOSS_PCT")
 
     flatten_minutes_before_close: int = Field(default=10, alias="FLATTEN_MINUTES_BEFORE_CLOSE")
     pdt_guard: bool = Field(default=True, alias="PDT_GUARD")
@@ -128,6 +148,9 @@ class Settings(BaseSettings):
             if data.get(key) is None:
                 setattr(self, key, value)
         return self
+
+    def is_max_growth(self) -> bool:
+        return self.risk_profile == RiskProfile.MAX
 
     def strategy_list(self) -> List[str]:
         return [s.strip().lower() for s in self.strategies.split(",") if s.strip()]

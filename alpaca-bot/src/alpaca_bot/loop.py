@@ -99,15 +99,16 @@ class TradingLoop:
                 log.exception("scan failed for %s: %s", symbol, exc)
                 self.store.log_event("scan_error", {"symbol": symbol, "error": str(exc)})
 
-        # Prefer highest-conviction edges (tweet: only trade when disagreement is wide)
+        # Prefer highest-conviction edges on names we do not already hold
+        candidates = [s for s in candidates if s.symbol not in positions]
         candidates.sort(key=lambda s: s.score, reverse=True)
-        max_new = max(1, int(self.settings.max_positions or 5) - len(positions))
+        slots = max(0, int(self.settings.max_positions or 5) - len(positions))
+        max_new = min(slots, int(self.settings.max_new_per_cycle or 5))
         if self.risk.mode == TradingMode.SURVIVAL:
             max_new = min(max_new, 1)
+        max_new = max(max_new, 0)
 
         for signal in candidates[:max_new]:
-            if signal.symbol in positions:
-                continue
             try:
                 df = self.client.get_bars(signal.symbol, limit=5)
                 price = float(df["close"].iloc[-1])
@@ -115,7 +116,7 @@ class TradingLoop:
                 continue
 
             decision = self.risk.approve(
-                signal, account, price, already_held=signal.symbol in positions
+                signal, account, price, already_held=False
             )
             self.store.log_event(
                 "risk",
@@ -200,10 +201,10 @@ class TradingLoop:
         self.store.set_meta("cut_symbols_today", ",".join(sorted(cuts)))
 
     def _manage_exits(self, positions=None) -> int:
-        """Cut losers; re-close symbols on the session cut list."""
+        """Cut losers past the threshold; optional session cut list."""
         positions = positions if positions is not None else self.client.positions_by_symbol()
-        cut_pct = self.risk.position_cut_threshold()  # percent, e.g. -2.0
-        cut_symbols = self._cut_symbols_today()
+        cut_pct = self.risk.position_cut_threshold()  # percent, e.g. -3.5
+        cut_symbols = self._cut_symbols_today() if self.settings.block_reentry_after_cut else set()
         exits = 0
         for symbol, pos in list(positions.items()):
             if symbol.upper() in cut_symbols:
@@ -215,7 +216,8 @@ class TradingLoop:
             except (TypeError, ValueError):
                 uplpc = 0.0
             if uplpc <= cut_pct:
-                self._record_cut(symbol)
+                if self.settings.block_reentry_after_cut:
+                    self._record_cut(symbol)
                 self._exit(symbol, f"cut loser ({uplpc:.2f}%)")
                 exits += 1
         return exits
