@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -47,6 +49,70 @@ def test_best_signal_picks_highest():
     best = best_signal(signals, min_score=0.5)
     assert best is not None
     assert best.symbol == "B"
+
+
+def test_risk_survival_from_position_loss(tmp_path):
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        SURVIVAL_POSITION_LOSS_PCT=1.5,
+    ).resolved()
+    store = StateStore(tmp_path / "t4.db")
+    risk = RiskManager(settings, store)
+    store.set_meta("day_start_date", __import__("datetime").date.today().isoformat())
+    store.set_meta("day_start_equity", "102000")
+    store.set_meta("day_peak_equity", "102500")
+
+    class Pos:
+        unrealized_plpc = -0.028
+
+    acct = AccountSnapshot(
+        equity=102_000, cash=50_000, buying_power=200_000, day_pl_pct=0.5, open_positions=1
+    )
+    assert risk.sync_mode(acct, {"META": Pos()}) == TradingMode.SURVIVAL
+
+
+def test_position_cut_threshold():
+    settings = Settings(ALPACA_API_KEY="x", ALPACA_SECRET_KEY="y").resolved()
+    risk = RiskManager(settings, StateStore(Path("/tmp/x.db")))  # noqa: S108
+    risk.mode = TradingMode.NORMAL
+    assert risk.position_cut_threshold() == -2.0
+    risk.mode = TradingMode.SURVIVAL
+    assert risk.position_cut_threshold() == -1.0
+
+
+def test_risk_survival_sticky_for_session(tmp_path):
+    settings = Settings(ALPACA_API_KEY="x", ALPACA_SECRET_KEY="y").resolved()
+    store = StateStore(tmp_path / "t5.db")
+    risk = RiskManager(settings, store)
+    store.set_meta("day_start_date", __import__("datetime").date.today().isoformat())
+    store.set_meta("day_start_equity", "102000")
+    store.set_meta("day_peak_equity", "102500")
+    store.set_meta("survival_today", "1")
+
+    class Pos:
+        unrealized_plpc = -0.005
+
+    acct = AccountSnapshot(
+        equity=102_100, cash=50_000, buying_power=200_000, day_pl_pct=0.5, open_positions=1
+    )
+    assert risk.sync_mode(acct, {"SPY": Pos()}) == TradingMode.SURVIVAL
+
+
+def test_risk_blocks_reentry_after_cut(tmp_path):
+    settings = Settings(
+        ALPACA_API_KEY="x",
+        ALPACA_SECRET_KEY="y",
+        PDT_GUARD=False,
+    ).resolved()
+    store = StateStore(tmp_path / "t6.db")
+    store.set_meta("cut_symbols_today", "META")
+    risk = RiskManager(settings, store)
+    acct = AccountSnapshot(100_000, 50_000, 200_000, 0, 0)
+    sig = Signal("META", Side.BUY, 0.95, "breakout", "x", stop_price=550, atr=5)
+    d = risk.approve(sig, acct, price=570, already_held=False)
+    assert not d.approved
+    assert "cut earlier" in d.reason
 
 
 def test_risk_survival_and_halt(tmp_path):

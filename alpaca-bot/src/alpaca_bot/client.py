@@ -10,8 +10,9 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import (
+    GetOrdersRequest,
     MarketOrderRequest,
     StopLossRequest,
     TakeProfitRequest,
@@ -169,6 +170,12 @@ class AlpacaClient:
         return self.trading.submit_order(req)
 
     def close_position(self, symbol: str) -> Any:
+        # Bracket stop/TP legs hold shares until cancelled
+        open_orders = self.trading.get_orders(
+            filter=GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+        )
+        for order in open_orders:
+            self.trading.cancel_order_by_id(order.id)
         return self.trading.close_position(symbol)
 
     def close_all_positions(self) -> Any:

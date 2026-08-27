@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from alpaca_bot.config import Settings
 from alpaca_bot.state import StateStore
@@ -45,16 +45,29 @@ class RiskManager:
         self.week_start_equity: Optional[float] = None
         self._halt_reason: str = ""
 
-    def sync_mode(self, account: AccountSnapshot) -> TradingMode:
+    def sync_mode(
+        self,
+        account: AccountSnapshot,
+        positions: dict[str, Any] | None = None,
+    ) -> TradingMode:
         today = date.today().isoformat()
         stored_day = self.store.get_meta("day_start_date")
         stored_equity = self.store.get_meta("day_start_equity")
         if stored_day != today or not stored_equity:
             self.store.set_meta("day_start_date", today)
             self.store.set_meta("day_start_equity", str(account.equity))
+            self.store.set_meta("day_peak_equity", str(account.equity))
+            self.store.set_meta("survival_today", "0")
+            self.store.set_meta("cut_symbols_today", "")
             self.day_start_equity = account.equity
         else:
             self.day_start_equity = float(stored_equity)
+
+        peak_raw = self.store.get_meta("day_peak_equity")
+        peak = float(peak_raw) if peak_raw else account.equity
+        if account.equity > peak:
+            peak = account.equity
+            self.store.set_meta("day_peak_equity", str(peak))
 
         week_key = date.today().isocalendar()
         week_id = f"{week_key.year}-W{week_key.week}"
@@ -84,28 +97,65 @@ class RiskManager:
         max_daily = float(self.settings.max_daily_loss_pct or 3.0)
         max_weekly = float(self.settings.max_weekly_loss_pct)
         survival_dd = float(self.settings.survival_drawdown_pct)
+        survival_giveback = float(self.settings.survival_giveback_pct)
+        survival_pos_loss = float(self.settings.survival_position_loss_pct)
 
         if day_dd >= max_daily or week_dd >= max_weekly:
             self.halt(f"drawdown circuit breaker day={day_dd:.2f}% week={week_dd:.2f}%")
             return self.mode
 
-        if day_dd >= survival_dd or account.equity < (self.day_start_equity or account.equity) * 0.985:
-            # Tweet-style survival: tighten when capital is under threat
+        giveback_pct = ((peak - account.equity) / peak * 100) if peak > 0 else 0.0
+        worst_pos_pct = self._worst_position_pct(positions)
+
+        survival_reason = None
+        if day_dd >= survival_dd:
+            survival_reason = f"day_dd={day_dd:.2f}%"
+        elif giveback_pct >= survival_giveback and peak > (self.day_start_equity or 0):
+            survival_reason = f"giveback={giveback_pct:.2f}% from peak"
+        elif worst_pos_pct <= -survival_pos_loss:
+            survival_reason = f"position_loss={worst_pos_pct:.2f}%"
+
+        if survival_reason:
             if self.mode != TradingMode.SURVIVAL:
                 self.store.log_event(
                     "mode_change",
                     {
                         "from": self.mode.value,
                         "to": TradingMode.SURVIVAL.value,
+                        "reason": survival_reason,
                         "day_dd_pct": day_dd,
+                        "giveback_pct": giveback_pct,
+                        "worst_pos_pct": worst_pos_pct,
                         "equity": account.equity,
                     },
                 )
+            self.store.set_meta("survival_today", "1")
+            self.mode = TradingMode.SURVIVAL
+        elif self.store.get_meta("survival_today") == "1":
             self.mode = TradingMode.SURVIVAL
         else:
             self.mode = TradingMode.NORMAL
 
         return self.mode
+
+    @staticmethod
+    def _worst_position_pct(positions: dict[str, Any] | None) -> float:
+        if not positions:
+            return 0.0
+        worst = 0.0
+        for pos in positions.values():
+            try:
+                uplpc = float(getattr(pos, "unrealized_plpc", 0) or 0) * 100
+            except (TypeError, ValueError):
+                uplpc = 0.0
+            worst = min(worst, uplpc)
+        return worst
+
+    def position_cut_threshold(self) -> float:
+        """Unrealized P/L % at or below which a position is closed."""
+        if self.mode == TradingMode.SURVIVAL:
+            return -float(self.settings.survival_position_cut_pct)
+        return -float(self.settings.position_cut_pct)
 
     def halt(self, reason: str) -> None:
         self.mode = TradingMode.HALTED
@@ -163,6 +213,14 @@ class RiskManager:
         if already_held:
             return RiskDecision(False, 0, "already holding — no averaging down", self.mode)
 
+        cuts = {
+            s.strip().upper()
+            for s in (self.store.get_meta("cut_symbols_today") or "").split(",")
+            if s.strip()
+        }
+        if signal.symbol.upper() in cuts:
+            return RiskDecision(False, 0, "symbol cut earlier today", self.mode)
+
         if self.settings.pdt_guard and account.equity < self.settings.pdt_equity_threshold:
             since = (date.today() - timedelta(days=7)).isoformat()
             if self.store.day_trade_count(since) >= 3:
@@ -178,12 +236,12 @@ class RiskManager:
         # Scale size by conviction (tweet: size up when disagreement is wide)
         risk_budget *= 0.5 + signal.score
         if self.mode == TradingMode.SURVIVAL:
-            risk_budget *= 0.5
+            risk_budget *= 0.75  # still deploy capital into best setups, but smaller
 
         qty = risk_budget / risk_per_share
         max_notional = account.equity * float(self.settings.max_position_pct or 0.1)
         if self.mode == TradingMode.SURVIVAL:
-            max_notional *= 0.5
+            max_notional *= 0.65
         qty = min(qty, max_notional / price, account.buying_power / price)
         qty = max(0.0, float(int(qty * 1000) / 1000))  # milli-share friendly
 

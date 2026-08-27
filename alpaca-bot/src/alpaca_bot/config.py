@@ -86,8 +86,12 @@ class Settings(BaseSettings):
     take_profit_r: float = Field(default=2.0, alias="TAKE_PROFIT_R")
     trail_atr_mult: float = Field(default=1.2, alias="TRAIL_ATR_MULT")
 
-    # Survival mode: when equity drawdown from day-open hits this, tighten hard
+    # Survival mode: tighten when day, peak giveback, or any big loser
     survival_drawdown_pct: float = Field(default=2.0, alias="SURVIVAL_DRAWDOWN_PCT")
+    survival_giveback_pct: float = Field(default=0.5, alias="SURVIVAL_GIVEBACK_PCT")
+    survival_position_loss_pct: float = Field(default=1.5, alias="SURVIVAL_POSITION_LOSS_PCT")
+    position_cut_pct: float = Field(default=2.0, alias="POSITION_CUT_PCT")
+    survival_position_cut_pct: float = Field(default=1.0, alias="SURVIVAL_POSITION_CUT_PCT")
     # Hard stop: flatten + halt for the day
     max_weekly_loss_pct: float = Field(default=8.0, alias="MAX_WEEKLY_LOSS_PCT")
 

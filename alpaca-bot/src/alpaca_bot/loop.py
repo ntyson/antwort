@@ -49,7 +49,8 @@ class TradingLoop:
             return summary
 
         account = self.client.account_snapshot()
-        mode = self.risk.sync_mode(account)
+        positions = self.client.positions_by_symbol()
+        mode = self.risk.sync_mode(account, positions)
         summary["mode"] = mode.value
         summary["equity"] = account.equity
         summary["day_pl_pct"] = account.day_pl_pct
@@ -65,17 +66,15 @@ class TradingLoop:
 
         if mode == TradingMode.HALTED:
             summary["skipped"].append("halted")
-            # Still manage exits if somehow open
-            summary["exits"] += self._manage_exits()
+            summary["exits"] += self._manage_exits(positions)
             return summary
 
-        positions = self.client.positions_by_symbol()
         summary["exits"] += self._manage_exits(positions)
 
         # Refresh after exits
         positions = self.client.positions_by_symbol()
         account = self.client.account_snapshot()
-        self.risk.sync_mode(account)
+        self.risk.sync_mode(account, positions)
 
         symbols = self.settings.watchlist_symbols()
         candidates: List[Signal] = []
@@ -188,19 +187,35 @@ class TradingLoop:
         self.store.record_day_trade(symbol, date.today().isoformat())
         self.store.log_event("exit", {"symbol": symbol, "reason": reason})
 
+    def _cut_symbols_today(self) -> set[str]:
+        return {
+            s.strip().upper()
+            for s in (self.store.get_meta("cut_symbols_today") or "").split(",")
+            if s.strip()
+        }
+
+    def _record_cut(self, symbol: str) -> None:
+        cuts = self._cut_symbols_today()
+        cuts.add(symbol.upper())
+        self.store.set_meta("cut_symbols_today", ",".join(sorted(cuts)))
+
     def _manage_exits(self, positions=None) -> int:
-        """Time-stop and survival flatten for non-intraday holds."""
+        """Cut losers; re-close symbols on the session cut list."""
         positions = positions if positions is not None else self.client.positions_by_symbol()
+        cut_pct = self.risk.position_cut_threshold()  # percent, e.g. -2.0
+        cut_symbols = self._cut_symbols_today()
         exits = 0
-        if self.risk.mode == TradingMode.SURVIVAL:
-            # Tweet: dump multi-day / risky holds; keep only same-session names
-            for symbol, pos in list(positions.items()):
-                # If unrealized is deeply red in survival, cut
-                try:
-                    uplpc = float(getattr(pos, "unrealized_plpc", 0) or 0)
-                except (TypeError, ValueError):
-                    uplpc = 0.0
-                if uplpc < -0.01:
-                    self._exit(symbol, "survival cut loser")
-                    exits += 1
+        for symbol, pos in list(positions.items()):
+            if symbol.upper() in cut_symbols:
+                self._exit(symbol, "session cut cooldown")
+                exits += 1
+                continue
+            try:
+                uplpc = float(getattr(pos, "unrealized_plpc", 0) or 0) * 100
+            except (TypeError, ValueError):
+                uplpc = 0.0
+            if uplpc <= cut_pct:
+                self._record_cut(symbol)
+                self._exit(symbol, f"cut loser ({uplpc:.2f}%)")
+                exits += 1
         return exits

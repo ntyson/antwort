@@ -9,7 +9,7 @@ Inspired by agent-style loops that scan on a timer, trade only when the edge is 
 ## What it does every cycle
 
 1. Confirms the US equity session is open  
-2. Syncs **normal / survival / halted** mode from day & week drawdown  
+2. Syncs **normal / survival / halted** mode from day drawdown, peak giveback, or bleeding positions  
 3. Manages exits (signal sells, survival cuts, EOD flatten)  
 4. Pulls bars for the watchlist and runs four strategies  
 5. Keeps only setups above the conviction threshold  
@@ -19,12 +19,19 @@ Inspired by agent-style loops that scan on a timer, trade only when the edge is 
 
 ### Survival mode (tweet-style adaptation)
 
-When day drawdown hits `SURVIVAL_DRAWDOWN_PCT` (default 2%):
+Survival mode triggers when **any** of these fire:
 
+- Day drawdown ≥ `SURVIVAL_DRAWDOWN_PCT` (default 2%)
+- Giveback from intraday equity peak ≥ `SURVIVAL_GIVEBACK_PCT` (default 0.5%)
+- Any open position down ≥ `SURVIVAL_POSITION_LOSS_PCT` (default 1.5%)
+
+Then the bot:
+
+- **Stays in survival for the rest of the session** once triggered (no flip-flop back to normal)
 - Drops mean-reversion  
 - Raises the minimum signal score  
-- Halves position size and max concurrent names  
-- Cuts open losers quickly  
+- Trims position size and max concurrent names (still deploys into best setups)  
+- Cuts open losers at `SURVIVAL_POSITION_CUT_PCT` (default 1%) instead of waiting for 2%  
 
 If daily or weekly loss limits trip → **halt** (no new entries).
 
@@ -102,7 +109,11 @@ docker run -e PORT=8080 --env-file .env alpaca-bot
 | `STRATEGIES` | `momentum,vwap,breakout,mean_reversion` | Active set |
 | `WATCHLIST` | liquid US names + ETFs | Comma-separated |
 | `MAX_DAILY_LOSS_PCT` | profile | Circuit breaker |
-| `SURVIVAL_DRAWDOWN_PCT` | `2.0` | Enter survival mode |
+| `SURVIVAL_DRAWDOWN_PCT` | `2.0` | Enter survival on day drawdown |
+| `SURVIVAL_GIVEBACK_PCT` | `0.5` | Enter survival on peak giveback |
+| `SURVIVAL_POSITION_LOSS_PCT` | `1.5` | Enter survival if any position bleeds |
+| `POSITION_CUT_PCT` | `2.0` | Cut losers in normal mode |
+| `SURVIVAL_POSITION_CUT_PCT` | `1.0` | Cut losers faster in survival |
 | `DRY_RUN` | `false` | Log decisions without ordering |
 | `RECAP_EMAIL_TO` | — | Email address for daily close recap |
 | `RESEND_API_KEY` | — | Send recap via [Resend](https://resend.com) |
