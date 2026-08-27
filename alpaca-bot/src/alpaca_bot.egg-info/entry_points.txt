@@ -1,2 +1,0 @@
-[console_scripts]
-alpaca-bot = alpaca_bot.cli:main

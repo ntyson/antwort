@@ -8,3 +8,4 @@ data/
 logs/
 *.db
 .DS_Store
+*.egg-info/
