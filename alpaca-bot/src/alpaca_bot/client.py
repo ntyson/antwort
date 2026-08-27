@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -110,6 +110,23 @@ class AlpacaClient:
         )
         return df.tail(limit).copy()
 
+    def _latest_price(self, symbol: str) -> float | None:
+        try:
+            trades = self.data.get_stock_latest_trade(
+                StockLatestTradeRequest(symbol_or_symbols=symbol)
+            )
+            if symbol in trades:
+                return float(trades[symbol].price)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            df = self.get_bars(symbol, limit=1)
+            if not df.empty:
+                return float(df["close"].iloc[-1])
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     def submit_bracket_buy(
         self,
         symbol: str,
@@ -117,9 +134,20 @@ class AlpacaClient:
         stop_price: float,
         take_profit: float,
     ) -> Any:
-        # Round stop/limit to cents
-        stop = round(stop_price, 2)
-        tp = round(take_profit, 2)
+        ref = self._latest_price(symbol)
+        if ref is None:
+            ref = max(take_profit, stop_price)
+        # Pad for fill slippage at the open (Alpaca validates vs actual base_price)
+        min_tp = round(ref * 1.003, 2)  # +0.3%
+        max_stop = round(ref * 0.997, 2)  # -0.3%
+        stop = round(min(stop_price, max_stop, ref - 0.01), 2)
+        tp = round(max(take_profit, min_tp, ref + 0.01), 2)
+        if stop >= ref:
+            stop = round(ref * 0.995, 2)
+        if tp <= ref:
+            tp = round(ref * 1.005, 2)
+        # Bracket orders require whole-share qty on Alpaca
+        qty = max(1, int(qty))
         req = MarketOrderRequest(
             symbol=symbol,
             qty=qty,
