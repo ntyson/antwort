@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     log_dir: Path = Field(default=Path("logs"), alias="LOG_DIR")
     dry_run: bool = Field(default=False, alias="DRY_RUN")
 
+    # Daily recap delivery (pick one channel)
+    recap_email_to: str = Field(default="", alias="RECAP_EMAIL_TO")
+    recap_webhook_url: str = Field(default="", alias="RECAP_WEBHOOK_URL")
+    resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from: str = Field(default="", alias="SMTP_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
     def resolved(self) -> "Settings":
         """Fill profile defaults for any unset risk knobs."""
         defaults = PROFILE_DEFAULTS[self.risk_profile]

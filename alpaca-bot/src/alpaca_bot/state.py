@@ -151,3 +151,48 @@ class StateStore:
                 }
                 for r in rows
             ]
+
+    def trades_for_date(self, day: str) -> List[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, side, qty, strategy, score, reason, order_id, mode, created_at
+                FROM trades WHERE created_at LIKE ?
+                ORDER BY id
+                """,
+                (f"{day}%",),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def exits_for_date(self, day: str) -> List[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM events
+                WHERE kind = 'exit' AND created_at LIKE ?
+                ORDER BY id
+                """,
+                (f"{day}%",),
+            ).fetchall()
+            out = []
+            for r in rows:
+                payload = json.loads(r["payload"])
+                if isinstance(payload, dict):
+                    out.append(payload)
+            return out
+
+    def cycle_stats_for_date(self, day: str) -> dict[str, int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM events
+                WHERE kind = 'cycle' AND created_at LIKE ?
+                """,
+                (f"{day}%",),
+            ).fetchall()
+            cycles = len(rows)
+            orders = 0
+            for r in rows:
+                payload = json.loads(r["payload"])
+                orders += int(payload.get("orders", 0) or 0)
+            return {"cycles": cycles, "orders": orders}

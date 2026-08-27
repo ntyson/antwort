@@ -1,3 +1,18 @@
+Metadata-Version: 2.4
+Name: alpaca-bot
+Version: 1.0.0
+Summary: Autonomous Alpaca stock day-trading bot with survival-mode risk adaptation
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: alpaca-py>=0.40.0
+Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: apscheduler>=3.10.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: rich>=13.0.0
+Requires-Dist: pyyaml>=6.0.0
+
 # Alpaca Day-Trading Bot
 
 Autonomous stock day trader for [Alpaca](https://alpaca.markets/) paper (default) or live accounts.
@@ -104,26 +119,8 @@ docker run -e PORT=8080 --env-file .env alpaca-bot
 | `MAX_DAILY_LOSS_PCT` | profile | Circuit breaker |
 | `SURVIVAL_DRAWDOWN_PCT` | `2.0` | Enter survival mode |
 | `DRY_RUN` | `false` | Log decisions without ordering |
-| `RECAP_EMAIL_TO` | — | Email address for daily close recap |
-| `RESEND_API_KEY` | — | Send recap via [Resend](https://resend.com) |
-| `SMTP_*` | — | Alternative: any SMTP provider |
-| `RECAP_WEBHOOK_URL` | — | Optional Discord/Slack webhook |
 
 Aggressive profile defaults: ~15% max position, 8 names, 1.5% risk/trade, 4% daily loss halt.
-
-### Daily recap email
-
-Every **weekday at ~4:05 PM ET** (after the US close), the bot emails a recap with day P/L, entries, exits, and open positions. Configure on Railway:
-
-```
-RECAP_EMAIL_TO=you@example.com
-RESEND_API_KEY=re_xxxx   # free tier works; verify your domain or use Resend sandbox
-SMTP_FROM=Alpaca Bot <onboarding@resend.dev>
-```
-
-Preview anytime: `python -m alpaca_bot recap` · Force send: `python -m alpaca_bot recap --send`
-
-Recaps are also saved to `logs/recap-YYYY-MM-DD.txt`.
 
 ## Safety rails
 
